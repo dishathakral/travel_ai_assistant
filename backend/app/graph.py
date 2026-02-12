@@ -138,6 +138,77 @@ def search_hotels(
 
 tools=[search_flights,search_hotels]
 model_with_tools = model.bind_tools(tools)
+
+class PrettyToolNode:
+    """Formats tool results for clean user output"""
+    def __init__(self, tools):
+        self.tools = {tool.name: tool for tool in tools}
+
+    def __call__(self, state):
+        messages = state['messages']
+        last_message = messages[-1]
+        
+        if not hasattr(last_message, 'tool_calls') or not last_message.tool_calls:
+            return state
+        
+        tool_messages = []
+        for tool_call in last_message.tool_calls:
+            tool_name = tool_call['name']
+            tool_args = tool_call['args']
+            
+            # Execute tool
+            result = self.tools[tool_name].invoke(tool_args)
+            
+            # FORMAT → Clean tables only
+            if tool_name == 'search_flights':
+                formatted = self._format_flights(result)
+            elif tool_name == 'search_hotels':
+                formatted = self._format_hotels(result)
+            else:
+                formatted = result
+            
+            tool_msg = ToolMessage(
+                content=formatted,
+                tool_call_id=tool_call['id']
+            )
+            tool_messages.append(tool_msg)
+        
+        return {'messages': tool_messages}
+
+    def _format_flights(self, data):
+        """Clean flight table"""
+        flights = data.get('data', [])
+        if not flights:
+            return "❌ No flights found"
+        
+        lines = ["**✈️ Flights Found**"]
+        for i, flight in enumerate(flights[:3], 1):  # Top 3
+            seg = flight['itineraries'][0]['segments'][0]
+            flight_num = f"{seg['carrierCode']}{seg['number']}"
+            depart = seg['departure']['at'][:16]
+            arrive = seg['arrival']['at'][:16]
+            duration = flight['itineraries'][0]['duration']
+            price = flight['price']['total']
+            seats = flight['numberOfBookableSeats']
+            
+            lines.append(f"{i}. **{flight_num}** {depart}→{arrive} ({duration}) €{price} ({seats} seats)")
+        
+        return '\n'.join(lines)
+
+    def _format_hotels(self, data):
+        """Clean hotel table"""
+        hotels = data.get('hotels', [])
+        if not hotels:
+            return "❌ No hotels found"
+        
+        lines = ["**🏨 Top Hotels**"]
+        for hotel in hotels[:3]:
+            price = hotel.get('price_per_night', 'N/A')
+            rating = hotel.get('rating', 'N/A')
+            lines.append(f"• **{hotel['name']}** ${price} ({rating}⭐)")
+        
+        return '\n'.join(lines)
+
 def model_call(state: AgentState,config: RunnableConfig | None = None) -> AgentState:
     # ✅ NEW (optional): access thread_id if you need it
     # thread_id = None
@@ -208,8 +279,8 @@ def should_continue(state: AgentState):
 graph = StateGraph(AgentState)
 graph.add_node("our_agent",model_call) 
 graph.add_edge (START, "our_agent") 
-tool_node = ToolNode(tools=tools)
-graph.add_node("tools",tool_node)
+pretty_tools = PrettyToolNode(tools)
+graph.add_node("tools", pretty_tools)
 graph.add_conditional_edges(
     "our_agent",
     should_continue,
