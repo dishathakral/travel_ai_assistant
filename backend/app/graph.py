@@ -89,7 +89,7 @@ def search_flights(
 def search_hotels(
     location: str,
     check_in_date: str,
-    check_out_date: str,
+    stay_length: int,
     adults: int = 1,
 ):
     """
@@ -98,7 +98,8 @@ def search_hotels(
     - location: City or place name (e.g. "Bali", "Mumbai")
     - Dates must be YYYY-MM-DD
     """
-
+    from datetime import datetime, timedelta
+    check_out_date = (datetime.fromisoformat(check_in_date) + timedelta(days=stay_length)).isoformat()
     params = {
         "engine": "google_hotels",
         "q": location,
@@ -176,38 +177,97 @@ class PrettyToolNode:
         return {'messages': tool_messages}
 
     def _format_flights(self, data):
-        """Clean flight table"""
+        """✅ PROPER HTML TABLE for flights"""
         flights = data.get('data', [])
         if not flights:
             return "❌ No flights found"
         
-        lines = ["**✈️ Flights Found**"]
-        for i, flight in enumerate(flights[:3], 1):  # Top 3
+        html = """
+        <div style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; margin: 10px 0;">
+        <h3 style="color: #1E88E5; margin: 0 0 15px 0;">✈️ Flights Found</h3>
+        <table style="border-collapse: collapse; width: 100%; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+            <thead>
+                <tr style="background: linear-gradient(135deg, #1E88E5 0%, #1976D2 100%); color: white;">
+                    <th style="padding: 15px 12px; text-align: left; font-weight: 600;">Flight</th>
+                    <th style="padding: 15px 12px; text-align: left; font-weight: 600;">Timing</th>
+                    <th style="padding: 15px 12px; text-align: right; font-weight: 600;">Price</th>
+                    <th style="padding: 15px 12px; text-align: right; font-weight: 600;">Seats</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        
+        for i, flight in enumerate(flights[:3], 1):
             seg = flight['itineraries'][0]['segments'][0]
             flight_num = f"{seg['carrierCode']}{seg['number']}"
-            depart = seg['departure']['at'][:16]
-            arrive = seg['arrival']['at'][:16]
+            depart = seg['departure']['at'][:16].replace('T', ' ')
+            arrive = seg['arrival']['at'][:16].replace('T', ' ')
             duration = flight['itineraries'][0]['duration']
             price = flight['price']['total']
             seats = flight['numberOfBookableSeats']
             
-            lines.append(f"{i}. **{flight_num}** {depart}→{arrive} ({duration}) €{price} ({seats} seats)")
+            html += f"""
+            <tr style="border-bottom: 1px solid #E0E0E0;">
+                <td style="padding: 15px 12px; font-weight: 500;">{i}. <strong>{flight_num}</strong></td>
+                <td style="padding: 15px 12px;">{depart} → {arrive}<br><small style="color: #666;">({duration})</small></td>
+                <td style="padding: 15px 12px; text-align: right; color: #2E7D32; font-weight: 600; font-size: 16px;">€{price}</td>
+                <td style="padding: 15px 12px; text-align: right; color: #388E3C;">{seats} <small>seats</small></td>
+            </tr>
+            """
         
-        return '\n'.join(lines)
+        html += """
+            </tbody>
+        </table>
+        </div>
+        """
+        return html
 
     def _format_hotels(self, data):
-        """Clean hotel table"""
+        """✅ FIXED: Handle float ratings safely"""
         hotels = data.get('hotels', [])
         if not hotels:
             return "❌ No hotels found"
         
-        lines = ["**🏨 Top Hotels**"]
-        for hotel in hotels[:3]:
-            price = hotel.get('price_per_night', 'N/A')
-            rating = hotel.get('rating', 'N/A')
-            lines.append(f"• **{hotel['name']}** ${price} ({rating}⭐)")
+        html = """
+        <div style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; margin: 10px 0;">
+        <h3 style="color: #FB8C00; margin: 0 0 15px 0;">🏨 Top Hotels</h3>
+        <table style="border-collapse: collapse; width: 100%; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+            <thead>
+                <tr style="background: linear-gradient(135deg, #FB8C00 0%, #F57C00 100%); color: white;">
+                    <th style="padding: 15px 12px; text-align: left; font-weight: 600;">Hotel</th>
+                    <th style="padding: 15px 12px; text-align: right; font-weight: 600;">Price/Night</th>
+                    <th style="padding: 15px 12px; text-align: right; font-weight: 600;">Rating</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
         
-        return '\n'.join(lines)
+        for hotel in hotels[:3]:
+            name = hotel.get('name', 'N/A')
+            price = hotel.get('price_per_night', 'N/A')
+            rating = hotel.get('rating')  # Could be float, str, None
+            
+            # ✅ FIXED: Safe rating handling
+            rating_display = rating if rating else 'N/A'
+            stars = '★' * int(float(rating) // 1) if isinstance(rating, (int, float)) and rating else ''
+            
+            html += f"""
+            <tr style="border-bottom: 1px solid #E0E0E0;">
+                <td style="padding: 15px 12px; font-weight: 500;"><strong>{name}</strong></td>
+                <td style="padding: 15px 12px; text-align: right; color: #2E7D32; font-weight: 600;">${price}</td>
+                <td style="padding: 15px 12px; text-align: right;">
+                    <span style="color: #FFB300;">{stars}</span> {rating_display}
+                </td>
+            </tr>
+            """
+        
+        html += """
+            </tbody>
+        </table>
+        </div>
+        """
+        return html
+
 
 def model_call(state: AgentState,config: RunnableConfig | None = None) -> AgentState:
     # ✅ NEW (optional): access thread_id if you need it

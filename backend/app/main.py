@@ -1,12 +1,18 @@
-import session
-import graph
-from session import session_manager
-from graph import agent
+# import session
+# import graph
+# from session import session_manager
+# from graph import agent
+from . import session
+from . import graph
+from .session import session_manager
+from .graph import agent
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
 from langchain_core.messages import HumanMessage
 
 app = FastAPI()
+
+
 
 async def run_langgraph_stream(websocket: WebSocket, thread_id: str, user_content: str):
     """Runs LangGraph and streams ALL output to WebSocket."""
@@ -17,11 +23,24 @@ async def run_langgraph_stream(websocket: WebSocket, thread_id: str, user_conten
         stream_mode="values"
     ):
         msg = event["messages"][-1]
+        # ✅ FILTER: Skip user echo (same as input)
+        if msg.content == user_content or msg.content.strip() == "":
+            continue
+            
+        # ✅ FILTER: Skip empty stream markers
+        if msg.content.startswith('{"type":"stream"') or not msg.content.strip():
+            continue
+            
+        # ✅ ONLY send FINAL clean content
         await websocket.send_json({
-            "type": "stream",
-            "content": msg.content,
-            "role": getattr(msg, "type", "unknown")
-        })
+            "role": "ai",
+            "content": msg.content.strip()
+        })    
+        # await websocket.send_json({
+        #     "type": "stream",
+        #     "content": msg.content,
+        #     "role": getattr(msg, "type", "unknown")
+         
 
 @app.websocket("/ws/{thread_id}")
 async def websocket_endpoint(websocket: WebSocket, thread_id: str):
@@ -34,7 +53,8 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str):
             # HANDLE INTERRUPT FIRST
             if msg_type == "interrupt":
                 session_manager.cancel(thread_id)
-                await websocket.send_json({"type": "system", "content": "Cancelled"})
+                await websocket.send_json({"role": "ai", 
+                    "content": "🛑 Cancelled. What next?"})
                 continue
             
             # NORMAL MESSAGE (only if not interrupt)
